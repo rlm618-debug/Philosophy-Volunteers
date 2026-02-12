@@ -48,7 +48,7 @@ st.subheader("🌐 任务大厅")
 if not st.session_state.tasks:
     st.info("目前还没有发布的任务。")
 else:
-for task in reversed(st.session_state.tasks):
+    for task in reversed(st.session_state.tasks):
         with st.container(border=True):
             st.write(f"**ID:** `{task['id']}`")
             st.info(task['content'])
