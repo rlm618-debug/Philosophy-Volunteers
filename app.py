@@ -1,55 +1,115 @@
 import streamlit as st
 import uuid
 import datetime
+import json
+import os
 
-# --- 页面设置 ---
-st.set_page_config(page_title="Philograph 哲学协作平台", layout="wide")
+# --- 1. 基础配置 ---
+st.set_page_config(page_title="Philograph 2.0", layout="wide")
 
-# --- 数据初始化 ---
+# --- 2. 模拟数据库 (简单文件存储) ---
+# 这会让内容在一定程度上“留存”，即使刷新网页也可能还在（取决于服务器重启频率）
+DB_FILE = "philosophy_db.json"
+
+def load_data():
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return []
+
+def save_data(data):
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
 if 'tasks' not in st.session_state:
-    st.session_state.tasks = []
-if 'is_logged_in' not in st.session_state:
-    st.session_state.is_logged_in = False
+    st.session_state.tasks = load_data()
 
-# --- 侧边栏 ---
+# --- 3. 侧边栏：用户说明 ---
 with st.sidebar:
-    st.title("👤 用户中心")
-    if not st.session_state.is_logged_in:
-        if st.button("模拟登录"):
-            st.session_state.is_logged_in = True
+    st.title("📖 使用说明")
+    st.markdown("""
+    **欢迎来到 Philograph！**
+    这里是哲学志愿者的论证协作空间：
+    1. **登录**：点击下方按钮获取研究员编号。
+    2. **发布**：提出一个待论证的哲学命题。
+    3. **回答**：对现有命题提交你的逻辑拆解。
+    4. **评价**：对参与者的回答进行深度评析。
+    ---
+    *注：当前为测试版，数据存储在临时云端。*
+    """)
+    
+    if not st.get_option("client.showErrorDetails"): # 仅作界面美化
+        st.divider()
+        
+    if 'user' not in st.session_state:
+        if st.button("🚀 开启研究员身份"):
             st.session_state.user = "研究员_" + uuid.uuid4().hex[:4]
             st.rerun()
     else:
-        st.success(f"已登录: {st.session_state.user}")
-        if st.button("退出登录"):
-            st.session_state.is_logged_in = False
-            st.rerun()
+        st.success(f"当前身份: {st.session_state.user}")
 
-# --- 主界面 ---
-st.title("📜 Philograph: 哲学论证协作平台")
-st.write("欢迎来到哲学论证存证系统。在这里，每一个逻辑节点都拥有唯一的身份 ID。")
+# --- 4. 主界面 ---
+st.title("📜 Philograph: 论证协作平台")
 
-# 1. 发布任务
-if st.session_state.is_logged_in:
-    with st.expander("➕ 发布新的哲学命题/任务"):
-        content = st.text_area("输入论证内容...", placeholder="例如：苏格拉底的‘精神助产术’在AI时代是否依然有效？")
-        if st.button("提交并铸造 ID"):
-            new_id = f"PHIL-2026-{uuid.uuid4().hex[:4].upper()}"
-            st.session_state.tasks.append({
-                "id": new_id,
+# 发布功能
+if 'user' in st.session_state:
+    with st.expander("➕ 启动新论证任务"):
+        content = st.text_area("输入论证命题...")
+        if st.button("发布命题"):
+            new_task = {
+                "id": str(uuid.uuid4())[:8],
                 "author": st.session_state.user,
                 "content": content,
-                "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            })
-            st.success(f"发布成功！任务 ID: {new_id}")
+                "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "replies": []
+            }
+            st.session_state.tasks.append(new_task)
+            save_data(st.session_state.tasks)
+            st.success("命题已存入档案！")
+            st.rerun()
 
-# 2. 任务列表
-st.subheader("🌐 任务大厅")
+# --- 5. 任务展示与交互 (问题-回答-评价) ---
+st.subheader("🌐 论证大厅")
+
+for i, task in enumerate(reversed(st.session_state.tasks)):
+    idx = len(st.session_state.tasks) - 1 - i
+    with st.container(border=True):
+        st.markdown(f"### 📍 命题 ID: `{task['id']}`")
+        st.info(task['content'])
+        st.caption(f"发布者: {task['author']} | 时间: {task['time']}")
+        
+        # 回答展示区
+        if task['replies']:
+            st.markdown("---")
+            for r_idx, reply in enumerate(task['replies']):
+                st.write(f"💬 **{reply['author']}** 的回答:")
+                st.write(reply['content'])
+                # 展示对回答的评价
+                for eval_text in reply.get('evaluations', []):
+                    st.warning(f"🧐 评价: {eval_text}")
+                
+                # 评价输入框
+                if 'user' in st.session_state:
+                    eval_input = st.text_input(f"评价该回答", key=f"eval_{task['id']}_{r_idx}")
+                    if st.button("提交评价", key=f"btn_eval_{task['id']}_{r_idx}"):
+                        if 'evaluations' not in reply: reply['evaluations'] = []
+                        reply['evaluations'].append(f"{st.session_state.user}: {eval_input}")
+                        save_data(st.session_state.tasks)
+                        st.rerun()
+                st.write("")
+
+        # 回答输入框
+        if 'user' in st.session_state:
+            with st.expander("✍️ 我来回答"):
+                reply_content = st.text_area("输入你的逻辑论证...", key=f"reply_area_{task['id']}")
+                if st.button("提交回答", key=f"reply_btn_{task['id']}"):
+                    st.session_state.tasks[idx]['replies'].append({
+                        "author": st.session_state.user,
+                        "content": reply_content,
+                        "evaluations": []
+                    })
+                    save_data(st.session_state.tasks)
+                    st.rerun()
+
 if not st.session_state.tasks:
-    st.info("目前还没有发布的任务。")
-else:
-    for task in reversed(st.session_state.tasks):
-        with st.container(border=True):
-            st.write(f"**ID:** `{task['id']}`")
-            st.info(task['content'])
-            st.caption(f"✍️ 贡献者: {task['author']}  |  ⏰ 时间: {task['time']}")
+    st.write("目前档案库为空。")
